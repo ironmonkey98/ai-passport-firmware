@@ -11,6 +11,7 @@
 #include "application.h"
 #include "codex_notify_private.h"
 #include "codex_query_audio.h"
+#include "passport_recorder.h"
 #include "settings.h"
 #include "wall_clock.h"
 
@@ -24,6 +25,7 @@ class CodexNotify {
     bool query_served_ = false;
     int64_t expires_at_ = 0;
     std::atomic<bool> tick_queued_{false};
+    PassportRecorder* recorder_ = nullptr;
     static bool Digits(const std::string& s, size_t start) {
         return s.find_first_not_of("0123456789", start) == std::string::npos;
     }
@@ -158,10 +160,19 @@ class CodexNotify {
                 if (event_id == MQTT_EVENT_CONNECTED) {
                     ESP_LOGI("CodexNotify", "notification channel connected");
                     esp_mqtt_client_subscribe(self->client_, CODEX_NOTIFY_SUB_TOPIC, 1);
+                    if (self->recorder_) self->recorder_->OnConnected(self->client_);
                 } else if (event_id == MQTT_EVENT_DATA) {
-                    self->Receive(static_cast<esp_mqtt_event_handle_t>(data));
+                    auto e = static_cast<esp_mqtt_event_handle_t>(data);
+                    // Recording ACKs share the connection; route them by topic.
+                    if (self->recorder_ && e->current_data_offset == 0 && e->data_len == e->total_data_len &&
+                        std::string(e->topic, e->topic_len) == self->recorder_->ack_topic()) {
+                        self->recorder_->OnAckMessage(e->data, e->data_len);
+                    } else {
+                        self->Receive(e);
+                    }
                 } else if (event_id == MQTT_EVENT_DISCONNECTED) {
                     ESP_LOGW("CodexNotify", "notification channel disconnected; reconnecting");
+                    if (self->recorder_) self->recorder_->OnDisconnected();
                 }
             },
             this);
@@ -179,6 +190,7 @@ class CodexNotify {
     }
 
 public:
+    void SetRecorder(PassportRecorder* recorder) { recorder_ = recorder; }
     void Start() {
         // StartNetwork invokes this after Application initialization.
         xTaskCreate(
@@ -192,8 +204,10 @@ public:
 };
 
 #else
+class PassportRecorder;
 class CodexNotify {
 public:
+    void SetRecorder(PassportRecorder*) {}
     void Start() {
         ESP_LOGW("CodexNotify",
                  "Notification credentials not configured; voice and UI remain available");

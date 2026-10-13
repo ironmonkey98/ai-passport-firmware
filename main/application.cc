@@ -243,6 +243,12 @@ void Application::Run() {
         }
 
         if (bits & MAIN_EVENT_SEND_AUDIO) {
+            if (GetDeviceState() == kDeviceStateRecording) {
+                // Recording never reaches the conversation protocol.
+                while (auto packet = audio_service_.PopPacketFromSendQueue()) {
+                    if (recording_sink_) recording_sink_(std::move(packet));
+                }
+            }
             while (auto packet = audio_service_.PopPacketFromSendQueue()) {
                 if (query_active_)
                     continue;  // Never mix microphone frames into a fixed query.
@@ -1082,6 +1088,40 @@ void Application::FinishNotificationQuery(bool success) {
         done(success);
 }
 
+bool Application::EnterRecording(std::function<void(std::unique_ptr<AudioStreamPacket>)> sink) {
+    if (query_active_ || GetDeviceState() != kDeviceStateIdle) {
+        return false;
+    }
+    recording_sink_ = std::move(sink);
+    if (!SetDeviceState(kDeviceStateRecording)) {
+        recording_sink_ = nullptr;
+        return false;
+    }
+    return true;
+}
+
+void Application::StartRecordingAudio() {
+    if (GetDeviceState() == kDeviceStateRecording) {
+        audio_service_.EnableVoiceProcessing(true);
+    }
+}
+
+void Application::StopRecordingAudio() {
+    // Stays in the recording state until the cloud answers the stop.
+    if (GetDeviceState() == kDeviceStateRecording) {
+        audio_service_.EnableVoiceProcessing(false);
+    }
+}
+
+void Application::LeaveRecording() {
+    if (GetDeviceState() != kDeviceStateRecording) {
+        return;
+    }
+    audio_service_.EnableVoiceProcessing(false);
+    recording_sink_ = nullptr;
+    SetDeviceState(kDeviceStateIdle);
+}
+
 bool Application::RequestNotificationWake(const std::string& task_id) {
     if (!protocol_ || GetDeviceState() != kDeviceStateIdle || task_id.size() < 3 ||
         task_id.size() > 14 || task_id.substr(0, 2) != "T-" ||
@@ -1235,6 +1275,11 @@ void Application::HandleStateChangedEvent() {
         case kDeviceStateWifiConfiguring:
             audio_service_.EnableVoiceProcessing(false);
             audio_service_.EnableWakeWordDetection(false);
+            break;
+        case kDeviceStateRecording:
+            // Capture starts only after the cloud accepts the session (StartRecordingAudio).
+            audio_service_.EnableWakeWordDetection(false);
+            audio_service_.EnableVoiceProcessing(false);
             break;
         default:
             // Do nothing

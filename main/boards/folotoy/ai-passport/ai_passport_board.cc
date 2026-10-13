@@ -3,6 +3,24 @@
 #include "button.h"
 #include "codecs/es8311_audio_codec.h"
 #include "codex_notify.h"
+#if __has_include("codex_notify_private.h")
+// The recording device ID is the notification account (one ACL per device).
+static PassportRecorder* RecorderInstance() {
+    static PassportRecorder recorder(CODEX_NOTIFY_USERNAME);
+    return &recorder;
+}
+#include "recording_overlay.h"
+// Main task. The overlay is created outside the recorder's mutex (lock order).
+static void ToggleRecording(Display* display) {
+    static RecordingOverlay overlay(RecorderInstance());
+    {
+        DisplayLockGuard lock(display);
+        overlay.Create(display);
+    }
+    RecorderInstance()->Toggle();
+}
+#define AI_PASSPORT_RECORDING 1
+#endif
 #include "config.h"
 #include "cw2017_battery_monitor.h"
 #include "display/lcd_display.h"
@@ -137,7 +155,19 @@ private:
 
         auto ok = adc_button_[kAdcButtonOk];
         ok->OnClick([this]() {
-            Application::GetInstance().Schedule([this]() { ToggleChat(); });
+            Application::GetInstance().Schedule([this]() {
+                // A click must not start a conversation in the middle of a recording.
+                if (Application::GetInstance().GetDeviceState() != kDeviceStateRecording) ToggleChat();
+            });
+        });
+        ok->OnLongPress([]() {
+#if AI_PASSPORT_RECORDING
+            Application::GetInstance().Schedule([]() { ToggleRecording(Board::GetInstance().GetDisplay()); });
+#else
+            Application::GetInstance().Schedule([]() {
+                Board::GetInstance().GetDisplay()->ShowNotification("未配置录音服务");
+            });
+#endif
         });
     }
 
@@ -234,6 +264,9 @@ public:
     void StartNetwork() override {
         WifiBoard::StartNetwork();
         static CodexNotify codex_notify;
+#if AI_PASSPORT_RECORDING
+        codex_notify.SetRecorder(RecorderInstance());
+#endif
         codex_notify.Start();
     }
 

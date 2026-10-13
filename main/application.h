@@ -115,6 +115,17 @@ public:
     bool RequestNotificationWake(const std::string& task_id);
     bool RequestNotificationQuery(const uint8_t* packets, size_t size,
                                   std::function<void(bool)> done);
+    // Online recording (main task only). EnterRecording() makes the device
+    // exclusive (no conversation, no wake word, notifications wait) without
+    // capturing yet; StartRecordingAudio() starts the encoder once the cloud
+    // accepted the session, and every encoded packet goes to `sink` instead of
+    // the conversation protocol. LeaveRecording() returns to idle.
+    bool EnterRecording(std::function<void(std::unique_ptr<AudioStreamPacket>)> sink);
+    void StartRecordingAudio();
+    void StopRecordingAudio();
+    void LeaveRecording();
+    uint32_t AudioSendQueueDropped() const { return audio_service_.SendQueueDropped(); }
+    uint32_t TakeInputPeakVariance() { return audio_service_.TakeInputPeakVariance(); }
     bool UpgradeFirmware(const std::string& url, const std::string& version = "");
     bool CanEnterSleepMode();
     void SendMcpMessage(const std::string& payload);
@@ -179,6 +190,7 @@ private:
     int64_t query_deadline_ = 0;
     esp_timer_handle_t query_timer_ = nullptr;
     std::function<void(bool)> query_done_;
+    std::function<void(std::unique_ptr<AudioStreamPacket>)> recording_sink_;
     void ContinueNotificationQuery();
     void TickNotificationQuery();
     void FinishNotificationQuery(bool success);

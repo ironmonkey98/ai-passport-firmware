@@ -13,6 +13,7 @@ enum DeviceState {
     kDeviceStateUpgrading,
     kDeviceStateActivating,
     kDeviceStateAudioTesting,
+    kDeviceStateRecording,
     kDeviceStateFatalError
 };
 

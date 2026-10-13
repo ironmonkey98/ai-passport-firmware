@@ -315,9 +315,14 @@ void AudioService::AudioInputTask() {
                 if (bits & AS_EVENT_AUDIO_PROCESSOR_RUNNING) {
                     uint32_t now = static_cast<uint32_t>(esp_timer_get_time() / 1000);
                     input_seen_ms_ = now;
-                    if (InputQuiet::HasSoundActivity(data.data(), data.size(),
-                                                     codec_->input_channels()))
+                    uint32_t variance = InputQuiet::SoundVariance(data.data(), data.size(),
+                                                                  codec_->input_channels());
+                    if (variance >= 240U * 240U)  // InputQuiet::HasSoundActivity
                         input_sound_ms_ = now;
+                    // Peak since the UI last read it (recording level meter).
+                    uint32_t peak = input_peak_variance_.load();
+                    while (variance > peak && !input_peak_variance_.compare_exchange_weak(peak, variance)) {
+                    }
                 }
                 audio_engine_->Feed(std::move(data));
                 continue;
@@ -504,6 +509,7 @@ void AudioService::OpusCodecTask() {
                              * audio is useless to the server, so drop the oldest packet. */
                             if (audio_send_queue_.size() >= MAX_SEND_PACKETS_IN_QUEUE) {
                                 audio_send_queue_.pop_front();
+                                send_queue_dropped_++;
                             }
                             audio_send_queue_.push_back(std::move(packet));
                         }

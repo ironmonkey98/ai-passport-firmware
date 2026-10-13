@@ -123,6 +123,10 @@ public:
     std::unique_ptr<AudioStreamPacket> PopWakeWordPacket();
     const std::string& GetLastWakeWord() const;
     bool CanYieldQuietListening(bool waiting_for_reply, bool manual);
+    // Encoded packets dropped because the send queue was full (oldest first).
+    uint32_t SendQueueDropped() const { return send_queue_dropped_.load(); }
+    // Peak input variance (PCM^2, DC removed) since the previous call; 0 when not capturing.
+    uint32_t TakeInputPeakVariance() { return input_peak_variance_.exchange(0); }
     bool IsVoiceDetected() const { return voice_detected_; }
     bool IsIdle();
     bool IsPlaybackIdle();
@@ -201,6 +205,8 @@ private:
     bool audio_engine_initialized_ = false;
     bool voice_detected_ = false;
     std::atomic<uint32_t> input_observation_started_ms_{0}, input_seen_ms_{0}, input_sound_ms_{0};
+    std::atomic<uint32_t> send_queue_dropped_{0};
+    std::atomic<uint32_t> input_peak_variance_{0};
 #if CONFIG_USE_DEVICE_AEC
     bool device_aec_enabled_ = true;
 #else
