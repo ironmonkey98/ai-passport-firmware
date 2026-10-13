@@ -20,6 +20,7 @@
 #include "assets/lang_config.h"
 #include "anim_player.h"
 #include "emoji_display.h"
+#include "muse_style_display.h"
 #include "servo_dog_ctrl.h"
 #include "led_strip.h"
 #include "driver/rmt_tx.h"
@@ -95,7 +96,7 @@ private:
     Button boot_button_;
     Button audio_wake_button_;
     Button move_wake_button_;
-    anim::EmojiWidget* display_ = nullptr;
+    Display* display_ = nullptr;
     bool web_server_initialized_ = false;
     led_strip_handle_t led_strip_;
     bool led_on_ = false;
@@ -299,19 +300,35 @@ private:
         vTaskDelay(pdMS_TO_TICKS(120));
         esp_lcd_panel_init(panel);
         esp_lcd_panel_invert_color(panel, false);
+#if CONFIG_ESP_HI_MUSE_STYLE_UI
+        // Portrait: the panel's 80 columns sit 24 columns into the controller.
+        esp_lcd_panel_set_gap(panel, 24, 0);
+        esp_lcd_panel_mirror(panel, false, false);
+        esp_lcd_panel_swap_xy(panel, false);
+#else
         esp_lcd_panel_set_gap(panel, 0, 24);
         esp_lcd_panel_mirror(panel, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y);
         esp_lcd_panel_swap_xy(panel, DISPLAY_SWAP_XY);
+#endif
         ESP_LOGI(TAG, "LCD panel create success, %p", panel);
 
         esp_lcd_panel_disp_on_off(panel, true);
 
         // Clear residual GRAM so a failed assets load does not leave snow on screen.
         std::vector<uint16_t> black(DISPLAY_WIDTH * DISPLAY_HEIGHT, 0);
+#if CONFIG_ESP_HI_MUSE_STYLE_UI
+        esp_lcd_panel_draw_bitmap(panel, 0, 0, DISPLAY_HEIGHT, DISPLAY_WIDTH, black.data());
+#else
         esp_lcd_panel_draw_bitmap(panel, 0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT, black.data());
+#endif
 
+#if CONFIG_ESP_HI_MUSE_STYLE_UI
+        display_ = new MuseStyleDisplay(panel_io, panel, DISPLAY_HEIGHT, DISPLAY_WIDTH, 0, 0, false,
+                                        false, false);
+#else
         ESP_LOGI(TAG, "Create emoji widget, panel: %p, panel_io: %p", panel, panel_io);
         display_ = new anim::EmojiWidget(panel, panel_io);
+#endif
 
 #if CONFIG_ESP_CONSOLE_NONE
         servo_dog_ctrl_config_t config = {

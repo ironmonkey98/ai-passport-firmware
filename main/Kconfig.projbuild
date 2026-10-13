@@ -879,6 +879,15 @@ config JC4827W543_EXTERNAL_AMP
         what a stock unit uses. Enable this only if you drive an external I2S
         amplifier from the expansion headers instead.
 
+config ESP_HI_MUSE_STYLE_UI
+    bool "ESP-Hi: Muse-style pixel UI (portrait)"
+    depends on BOARD_TYPE_ESP_HI && USE_DEFAULT_MESSAGE_STYLE
+    default y
+    help
+        Turn the screen to 80x160 portrait and show the Muse-style pixel UI
+        (status, avatar, subtitle) instead of the emoji animations. For an
+        ESP-Hi board used without the dog body.
+
 config AI_PASSPORT_MUSE_STYLE_UI
     bool "AI Passport: Muse-style pixel robot UI"
     depends on BOARD_TYPE_FOLOTOY_AI_PASSPORT && USE_DEFAULT_MESSAGE_STYLE
