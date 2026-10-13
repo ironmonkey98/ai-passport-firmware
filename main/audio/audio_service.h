@@ -122,6 +122,7 @@ public:
     void EncodeWakeWord();
     std::unique_ptr<AudioStreamPacket> PopWakeWordPacket();
     const std::string& GetLastWakeWord() const;
+    bool CanYieldQuietListening(bool waiting_for_reply, bool manual);
     bool IsVoiceDetected() const { return voice_detected_; }
     bool IsIdle();
     bool IsPlaybackIdle();
@@ -199,6 +200,7 @@ private:
 
     bool audio_engine_initialized_ = false;
     bool voice_detected_ = false;
+    std::atomic<uint32_t> input_observation_started_ms_{0}, input_seen_ms_{0}, input_sound_ms_{0};
 #if CONFIG_USE_DEVICE_AEC
     bool device_aec_enabled_ = true;
 #else

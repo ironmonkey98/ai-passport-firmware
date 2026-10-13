@@ -6,12 +6,13 @@
 #include <freertos/task.h>
 #include <esp_timer.h>
 
-#include <string>
-#include <mutex>
-#include <deque>
-#include <memory>
-#include <functional>
+#include <atomic>
 #include <cstdint>
+#include <deque>
+#include <functional>
+#include <memory>
+#include <mutex>
+#include <string>
 #include <vector>
 
 #include "protocol.h"
@@ -36,7 +37,7 @@
 #define MAIN_EVENT_STOP_LISTENING       (1 << 11)
 #define MAIN_EVENT_STATE_CHANGED        (1 << 12)
 #define MAIN_EVENT_PLAYBACK_DRAINED     (1 << 13)
-
+#define MAIN_EVENT_QUERY_TICK (1 << 14)
 
 enum AecMode {
     kAecOff,
@@ -110,6 +111,10 @@ public:
 
     void Reboot();
     void WakeWordInvoke(const std::string& wake_word);
+    // Main-task only: send a legal wake word; this does not request a task query.
+    bool RequestNotificationWake(const std::string& task_id);
+    bool RequestNotificationQuery(const uint8_t* packets, size_t size,
+                                  std::function<void(bool)> done);
     bool UpgradeFirmware(const std::string& url, const std::string& version = "");
     bool CanEnterSleepMode();
     void SendMcpMessage(const std::string& payload);
@@ -165,8 +170,20 @@ private:
     void HandleActivationDoneEvent();
     void HandleWakeWordDetectedEvent();
     void ContinueOpenAudioChannel(ListeningMode mode);
-    void BeginWakeWordInvoke(const std::string& wake_word);
-    void ContinueWakeWordInvoke(const std::string& wake_word);
+    std::atomic<bool> query_active_{false};
+    std::atomic<bool> query_audio_received_{false};
+    const uint8_t* query_packets_ = nullptr;
+    size_t query_size_ = 0, query_offset_ = 0;
+    bool normal_turn_in_flight_ = false;
+    bool query_input_sent_ = false, query_tts_started_ = false, query_tts_stopped_ = false;
+    int64_t query_deadline_ = 0;
+    esp_timer_handle_t query_timer_ = nullptr;
+    std::function<void(bool)> query_done_;
+    void ContinueNotificationQuery();
+    void TickNotificationQuery();
+    void FinishNotificationQuery(bool success);
+    void BeginWakeWordInvoke(const std::string& wake_word, bool notification_wake = false);
+    void ContinueWakeWordInvoke(const std::string& wake_word, bool notification_wake = false);
     void StartListeningAudio();
     void ConfigureWakeWordForListening();
     void StartNotification(std::string audio_url, std::vector<NotifySubtitle> subtitles);

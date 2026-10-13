@@ -1,12 +1,13 @@
-#include "wifi_board.h"
+#include "application.h"
+#include "assets/lang_config.h"
+#include "button.h"
+#include "codecs/es8311_audio_codec.h"
+#include "codex_notify.h"
+#include "config.h"
+#include "cw2017_battery_monitor.h"
 #include "display/lcd_display.h"
 #include "muse_style_display.h"
-#include "codecs/es8311_audio_codec.h"
-#include "application.h"
-#include "button.h"
-#include "config.h"
-#include "assets/lang_config.h"
-#include "cw2017_battery_monitor.h"
+#include "wifi_board.h"
 
 #include <esp_log.h>
 #include <esp_lcd_panel_vendor.h>
@@ -228,6 +229,12 @@ public:
         InitializeDisplay();
         InitializeButtons();
         GetBacklight()->RestoreBrightness();
+    }
+
+    void StartNetwork() override {
+        WifiBoard::StartNetwork();
+        static CodexNotify codex_notify;
+        codex_notify.Start();
     }
 
     virtual AudioCodec* GetAudioCodec() override {

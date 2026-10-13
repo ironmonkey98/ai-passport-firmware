@@ -182,12 +182,17 @@ void Application::Run() {
         MAIN_EVENT_VAD_CHANGE | MAIN_EVENT_CLOCK_TICK | MAIN_EVENT_ERROR |
         MAIN_EVENT_NETWORK_CONNECTED | MAIN_EVENT_NETWORK_DISCONNECTED | MAIN_EVENT_TOGGLE_CHAT |
         MAIN_EVENT_START_LISTENING | MAIN_EVENT_STOP_LISTENING | MAIN_EVENT_ACTIVATION_DONE |
-        MAIN_EVENT_STATE_CHANGED | MAIN_EVENT_PLAYBACK_DRAINED;
+        MAIN_EVENT_STATE_CHANGED | MAIN_EVENT_PLAYBACK_DRAINED | MAIN_EVENT_QUERY_TICK;
 
     while (true) {
         auto bits = xEventGroupWaitBits(event_group_, ALL_EVENTS, pdTRUE, pdFALSE, portMAX_DELAY);
 
+        if (bits & MAIN_EVENT_QUERY_TICK)
+            TickNotificationQuery();
+
         if (bits & MAIN_EVENT_ERROR) {
+            if (query_active_)
+                FinishNotificationQuery(false);
             if (GetDeviceState() == kDeviceStateNotifying) {
                 StopNotification();
             }
@@ -239,6 +244,8 @@ void Application::Run() {
 
         if (bits & MAIN_EVENT_SEND_AUDIO) {
             while (auto packet = audio_service_.PopPacketFromSendQueue()) {
+                if (query_active_)
+                    continue;  // Never mix microphone frames into a fixed query.
                 if (protocol_ && !protocol_->SendAudio(std::move(packet))) {
                     // Drop the remaining packets. Leaving them in the queue would
                     // stall the Opus codec task (it waits for queue space), which in
@@ -553,7 +560,8 @@ void Application::InitializeProtocol() {
 
     protocol_->OnIncomingAudio([this](std::unique_ptr<AudioStreamPacket> packet) {
         if (GetDeviceState() == kDeviceStateSpeaking) {
-            audio_service_.PushPacketToDecodeQueue(std::move(packet));
+            if (audio_service_.PushPacketToDecodeQueue(std::move(packet)) && query_active_)
+                query_audio_received_ = true;
         }
     });
 
@@ -570,6 +578,9 @@ void Application::InitializeProtocol() {
     protocol_->OnAudioChannelClosed([this, &board]() {
         board.SetPowerSaveLevel(PowerSaveLevel::LOW_POWER);
         Schedule([this]() {
+            if (query_active_)
+                FinishNotificationQuery(false);
+            normal_turn_in_flight_ = false;
             auto display = Board::GetInstance().GetDisplay();
             display->SetChatMessage("system", "");
             SetDeviceState(kDeviceStateIdle);
@@ -624,10 +635,20 @@ void Application::InitializeProtocol() {
             if (strcmp(state->valuestring, "start") == 0) {
                 Schedule([this]() {
                     aborted_ = false;
+                    if (query_active_) {
+                        query_tts_started_ = true;
+                        query_tts_stopped_ = false;
+                    }
                     SetDeviceState(kDeviceStateSpeaking);
                 });
             } else if (strcmp(state->valuestring, "stop") == 0) {
                 Schedule([this]() {
+                    if (query_active_) {
+                        query_tts_stopped_ = true;
+                        TickNotificationQuery();
+                        return;
+                    }
+                    normal_turn_in_flight_ = false;
                     if (GetDeviceState() == kDeviceStateSpeaking) {
                         if (listening_mode_ == kListeningModeManualStop) {
                             SetDeviceState(kDeviceStateIdle);
@@ -661,8 +682,10 @@ void Application::InitializeProtocol() {
                     glyphs.clear();
                 }
                 ESP_LOGI(TAG, ">> %s", text->valuestring);
-                Schedule([display, message = std::string(text->valuestring),
+                Schedule([this, display, message = std::string(text->valuestring),
                           glyphs = std::move(glyphs), bpp]() {
+                    if (!query_active_ && !message.empty())
+                        normal_turn_in_flight_ = true;
                     display->AddTextGlyphs(glyphs, bpp);
                     display->SetChatMessage("user", message.c_str());
                 });
@@ -778,6 +801,8 @@ void Application::StartListening() { xEventGroupSetBits(event_group_, MAIN_EVENT
 void Application::StopListening() { xEventGroupSetBits(event_group_, MAIN_EVENT_STOP_LISTENING); }
 
 void Application::HandleToggleChatEvent() {
+    if (query_active_)
+        FinishNotificationQuery(false);
     auto state = GetDeviceState();
 
     if (state == kDeviceStateNotifying) {
@@ -842,6 +867,8 @@ void Application::ContinueOpenAudioChannel(ListeningMode mode) {
 }
 
 void Application::HandleStartListeningEvent() {
+    if (query_active_)
+        FinishNotificationQuery(false);
     auto state = GetDeviceState();
 
     if (state == kDeviceStateNotifying) {
@@ -878,6 +905,8 @@ void Application::HandleStartListeningEvent() {
 }
 
 void Application::HandleStopListeningEvent() {
+    if (query_active_)
+        FinishNotificationQuery(false);
     auto state = GetDeviceState();
 
     if (state == kDeviceStateNotifying) {
@@ -895,6 +924,8 @@ void Application::HandleStopListeningEvent() {
 }
 
 void Application::HandleWakeWordDetectedEvent() {
+    if (query_active_)
+        FinishNotificationQuery(false);
     if (!protocol_) {
         return;
     }
@@ -931,9 +962,143 @@ void Application::HandleWakeWordDetectedEvent() {
     }
 }
 
-void Application::BeginWakeWordInvoke(const std::string& wake_word) {
+bool Application::RequestNotificationQuery(const uint8_t* packets, size_t size,
+                                           std::function<void(bool)> done) {
+    if (protocol_ && !query_active_ && GetDeviceState() == kDeviceStateListening &&
+        !pending_listening_start_ &&
+        audio_service_.CanYieldQuietListening(normal_turn_in_flight_,
+                                              listening_mode_ == kListeningModeManualStop)) {
+        // End an inactive waiting-for-input session, then start the query on the next tick.
+        // Let its close callback drain first, avoiding a stale close aborting the new query.
+        ESP_LOGI(TAG, "Notification pending: quiet listening yielded after 15 seconds");
+        audio_service_.EnableVoiceProcessing(false);
+        protocol_->CloseAudioChannel();
+        SetDeviceState(kDeviceStateIdle);
+        return false;
+    }
+    if (!protocol_ || query_active_ || GetDeviceState() != kDeviceStateIdle ||
+        !audio_service_.IsPlaybackIdle() || !packets || size == 0 || size > 65536)
+        return false;
+    size_t offset = 0, count = 0;
+    while (offset + 2 <= size) {
+        size_t length = packets[offset] | (packets[offset + 1] << 8);
+        offset += 2;
+        if (length == 0 || length > 1275 || offset + length > size)
+            return false;
+        offset += length;
+        if (++count > 334)
+            return false;
+    }
+    if (offset != size)
+        return false;
+    if (!query_timer_) {
+        esp_timer_create_args_t timer = {};
+        timer.name = "query-upload";
+        timer.arg = this;
+        timer.callback = [](void* arg) {
+            auto self = static_cast<Application*>(arg);
+            xEventGroupSetBits(self->event_group_, MAIN_EVENT_QUERY_TICK);
+        };
+        if (esp_timer_create(&timer, &query_timer_) != ESP_OK)
+            return false;
+    }
+    query_active_ = true;
+    query_audio_received_ = false;
+    query_packets_ = packets;
+    query_size_ = size;
+    query_offset_ = 0;
+    query_input_sent_ = query_tts_started_ = query_tts_stopped_ = false;
+    query_deadline_ = esp_timer_get_time() + 180000000;
+    query_done_ = std::move(done);
+    aborted_ = false;
+    audio_service_.EnableVoiceProcessing(false);
+    audio_service_.EnableWakeWordDetection(false);
+    while (audio_service_.PopPacketFromSendQueue()) {
+    }
+    SetDeviceState(kDeviceStateConnecting);
+    Schedule([this]() { ContinueNotificationQuery(); });
+    return true;
+}
+
+void Application::ContinueNotificationQuery() {
+    if (!query_active_)
+        return;
+    if (GetDeviceState() != kDeviceStateConnecting) {
+        FinishNotificationQuery(false);
+        return;
+    }
+    Board::GetInstance().SetPowerSaveLevel(PowerSaveLevel::PERFORMANCE);
+    if (!protocol_->IsAudioChannelOpened() && !protocol_->OpenAudioChannel()) {
+        FinishNotificationQuery(false);
+        return;
+    }
+    SetListeningMode(kListeningModeManualStop);
+}
+
+void Application::TickNotificationQuery() {
+    if (!query_active_)
+        return;
+    if (aborted_ || esp_timer_get_time() > query_deadline_ || !protocol_->IsAudioChannelOpened()) {
+        FinishNotificationQuery(false);
+        return;
+    }
+    if (!query_input_sent_) {
+        if (query_offset_ == query_size_) {
+            protocol_->SendStopListening();
+            query_input_sent_ = true;
+            ESP_LOGI(TAG, "Notification query upload finished; waiting for cloud");
+        } else {
+            size_t length =
+                query_packets_[query_offset_] | (query_packets_[query_offset_ + 1] << 8);
+            query_offset_ += 2;
+            auto packet = std::make_unique<AudioStreamPacket>();
+            packet->sample_rate = 16000;
+            packet->frame_duration = 60;
+            packet->payload.assign(query_packets_ + query_offset_,
+                                   query_packets_ + query_offset_ + length);
+            query_offset_ += length;
+            if (!protocol_->SendAudio(std::move(packet)))
+                FinishNotificationQuery(false);
+        }
+        return;
+    }
+    if (query_tts_started_ && query_tts_stopped_ && query_audio_received_ &&
+        audio_service_.IsPlaybackIdle())
+        FinishNotificationQuery(true);
+}
+
+void Application::FinishNotificationQuery(bool success) {
+    if (!query_active_.exchange(false))
+        return;
+    if (query_timer_)
+        esp_timer_stop(query_timer_);
+    auto done = std::move(query_done_);
+    ESP_LOGI(TAG, "Notification query playback finished: %s",
+             success ? "drained" : "failed/interrupted");
+    if (protocol_->IsAudioChannelOpened())
+        protocol_->CloseAudioChannel(false);
+    SetDeviceState(kDeviceStateIdle);
+    if (done)
+        done(success);
+}
+
+bool Application::RequestNotificationWake(const std::string& task_id) {
+    if (!protocol_ || GetDeviceState() != kDeviceStateIdle || task_id.size() < 3 ||
+        task_id.size() > 14 || task_id.substr(0, 2) != "T-" ||
+        task_id.find_first_not_of("0123456789", 2) != std::string::npos) {
+        return false;
+    }
+    // listen.detect carries a wake word only, never a task query.
+    ESP_LOGI(TAG, "Notification wake requested for %s; cloud query is not confirmed",
+             task_id.c_str());
+    BeginWakeWordInvoke("你好小智", true);
+    return GetDeviceState() == kDeviceStateConnecting || GetDeviceState() == kDeviceStateListening;
+}
+
+void Application::BeginWakeWordInvoke(const std::string& wake_word, bool notification_wake) {
     // Must run in the main task with the device in idle state
-    audio_service_.EncodeWakeWord();
+    if (!notification_wake)
+        audio_service_.EncodeWakeWord();
 
     // Always pass through the connecting state, even if the audio channel is
     // already opened. ContinueWakeWordInvoke() rejects any other state, so
@@ -948,14 +1113,16 @@ void Application::BeginWakeWordInvoke(const std::string& wake_word) {
     if (!protocol_->IsAudioChannelOpened()) {
         // Schedule to let the state change be processed first (UI update),
         // then continue with OpenAudioChannel which may block for ~1 second
-        Schedule([this, wake_word]() { ContinueWakeWordInvoke(wake_word); });
+        Schedule([this, wake_word, notification_wake]() {
+            ContinueWakeWordInvoke(wake_word, notification_wake);
+        });
         return;
     }
     // Channel already opened, continue directly
-    ContinueWakeWordInvoke(wake_word);
+    ContinueWakeWordInvoke(wake_word, notification_wake);
 }
 
-void Application::ContinueWakeWordInvoke(const std::string& wake_word) {
+void Application::ContinueWakeWordInvoke(const std::string& wake_word, bool notification_wake) {
     // Check state again in case it was changed during scheduling
     if (GetDeviceState() != kDeviceStateConnecting) {
         return;
@@ -975,6 +1142,13 @@ void Application::ContinueWakeWordInvoke(const std::string& wake_word) {
         }
     }
 
+    if (notification_wake) {
+        ESP_LOGI(TAG, "Notification wake word sent; cloud query is not confirmed");
+        protocol_->SendWakeWordDetected(wake_word);
+        play_popup_on_listening_ = true;
+        SetListeningMode(GetDefaultListeningMode());
+        return;
+    }
     ESP_LOGI(TAG, "Wake word detected: %s", wake_word.c_str());
 #if CONFIG_SEND_WAKE_WORD_DATA
     // Encode and send the wake word data to the server
@@ -1072,6 +1246,17 @@ void Application::StartListeningAudio() {
     // Runs in the main loop, either directly from HandleStateChangedEvent or
     // deferred via MAIN_EVENT_PLAYBACK_DRAINED once the playback queue drains.
     if (GetDeviceState() != kDeviceStateListening) {
+        return;
+    }
+
+    if (query_active_) {
+        audio_service_.EnableVoiceProcessing(false);
+        audio_service_.EnableWakeWordDetection(false);
+        while (audio_service_.PopPacketFromSendQueue()) {
+        }
+        protocol_->SendStartListening(kListeningModeManualStop);
+        esp_timer_start_periodic(query_timer_, 60000);
+        ESP_LOGI(TAG, "Notification query upload started; microphone disabled");
         return;
     }
 
@@ -1173,6 +1358,9 @@ void Application::Schedule(std::function<void()>&& callback) {
 }
 
 void Application::AbortSpeaking(AbortReason reason) {
+    normal_turn_in_flight_ = false;
+    if (query_active_)
+        FinishNotificationQuery(false);
     ESP_LOGI(TAG, "Abort speaking");
     aborted_ = true;
     if (protocol_) {

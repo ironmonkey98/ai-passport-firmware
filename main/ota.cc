@@ -1,3 +1,4 @@
+#include "wall_clock.h"
 #include "ota.h"
 #include "system_info.h"
 #include "settings.h"
@@ -201,6 +202,9 @@ NetworkResult<> Ota::CheckVersion() {
             struct timeval tv;
             double ts = timestamp->valuedouble;
             
+            WallClock::timezone_offset_minutes.store(
+                cJSON_IsNumber(timezone_offset) ? timezone_offset->valueint : 0);
+
             // 如果有时区偏移，计算本地时间
             if (cJSON_IsNumber(timezone_offset)) {
                 ts += (timezone_offset->valueint * 60 * 1000); // 转换分钟为毫秒

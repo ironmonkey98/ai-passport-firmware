@@ -1,6 +1,7 @@
 #include "audio_service.h"
 #include <esp_log.h>
 #include <cstring>
+#include "input_quiet.h"
 
 #define RATE_CVT_CFG(_src_rate, _dest_rate, _channel)                                        \
     (esp_ae_rate_cvt_cfg_t) {                                                                \
@@ -311,6 +312,13 @@ void AudioService::AudioInputTask() {
             int samples = 160;  // 10ms
             std::vector<int16_t> data;
             if (ReadAudioData(data, 16000, samples)) {
+                if (bits & AS_EVENT_AUDIO_PROCESSOR_RUNNING) {
+                    uint32_t now = static_cast<uint32_t>(esp_timer_get_time() / 1000);
+                    input_seen_ms_ = now;
+                    if (InputQuiet::HasSoundActivity(data.data(), data.size(),
+                                                     codec_->input_channels()))
+                        input_sound_ms_ = now;
+                }
                 audio_engine_->Feed(std::move(data));
                 continue;
             }
@@ -706,6 +714,14 @@ void AudioService::ReleaseWakeWordResources() {
 #endif
 }
 
+bool AudioService::CanYieldQuietListening(bool waiting_for_reply, bool manual) {
+    if (!IsAudioProcessorRunning())
+        return false;
+    return InputQuiet::CanYield(
+        static_cast<uint32_t>(esp_timer_get_time() / 1000), input_observation_started_ms_.load(),
+        input_seen_ms_.load(), input_sound_ms_.load(), waiting_for_reply, manual, IsPlaybackIdle());
+}
+
 void AudioService::EnableVoiceProcessing(bool enable) {
     ESP_LOGD(TAG, "%s voice processing", enable ? "Enabling" : "Disabling");
 
@@ -721,6 +737,9 @@ void AudioService::EnableVoiceProcessing(bool enable) {
                 esp_ae_rate_cvt_reset(input_resampler_);
             }
         }
+        uint32_t now = static_cast<uint32_t>(esp_timer_get_time() / 1000);
+        input_observation_started_ms_ = input_sound_ms_ = now;
+        input_seen_ms_ = 0;
         audio_engine_->EnableVoiceProcessing(true);
         xEventGroupSetBits(event_group_, AS_EVENT_AUDIO_PROCESSOR_RUNNING);
     } else {
