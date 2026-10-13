@@ -879,6 +879,15 @@ config JC4827W543_EXTERNAL_AMP
         what a stock unit uses. Enable this only if you drive an external I2S
         amplifier from the expansion headers instead.
 
+config CUSTOM_BASE_MAC
+    string "Custom base MAC address"
+    default ""
+    help
+        Set the base MAC address at startup, as "02:11:22:33:44:55". The
+        Wi-Fi station uses it and the other interfaces are derived from it.
+        It also becomes the Device-Id sent to the server, so the device
+        must be activated again. Leave empty to use the factory MAC.
+
 config ESP_HI_MUSE_STYLE_UI
     bool "ESP-Hi: Muse-style pixel UI (portrait)"
     depends on BOARD_TYPE_ESP_HI && USE_DEFAULT_MESSAGE_STYLE
