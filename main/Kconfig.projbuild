@@ -879,6 +879,14 @@ config JC4827W543_EXTERNAL_AMP
         what a stock unit uses. Enable this only if you drive an external I2S
         amplifier from the expansion headers instead.
 
+config AI_PASSPORT_MUSE_STYLE_UI
+    bool "AI Passport: Muse-style pixel robot UI"
+    depends on BOARD_TYPE_FOLOTOY_AI_PASSPORT && USE_DEFAULT_MESSAGE_STYLE
+    default y
+    help
+        Show a pixel robot with a coloured status word, in the style of the
+        Muse Gadget SDK UI, instead of the default emoji screen.
+
 config USE_MULTILINE_CHAT_MESSAGE
     bool "Use multiline chat message display (default mode only)"
     depends on USE_DEFAULT_MESSAGE_STYLE

@@ -914,6 +914,12 @@ file(GLOB BOARD_SOURCES
 )
 list(APPEND SOURCES ${BOARD_SOURCES})
 
+# Muse-style pixel UI, shared by the boards that enable it
+if(CONFIG_AI_PASSPORT_MUSE_STYLE_UI OR CONFIG_ESP_HI_MUSE_STYLE_UI)
+    list(APPEND SOURCES "display/muse_style/muse_style_display.cc" "display/muse_style/robot_pixel.c")
+    list(APPEND INCLUDE_DIRS "display/muse_style")
+endif()
+
 # Select one audio engine for each chip family
 if(CONFIG_IDF_TARGET_ESP32S3 OR CONFIG_IDF_TARGET_ESP32P4 OR CONFIG_IDF_TARGET_ESP32S31)
     list(APPEND SOURCES "audio/engines/afe_audio_engine.cc")

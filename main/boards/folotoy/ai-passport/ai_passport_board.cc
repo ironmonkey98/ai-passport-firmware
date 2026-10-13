@@ -1,5 +1,6 @@
 #include "wifi_board.h"
 #include "display/lcd_display.h"
+#include "muse_style_display.h"
 #include "codecs/es8311_audio_codec.h"
 #include "application.h"
 #include "button.h"
@@ -210,7 +211,11 @@ private:
         esp_lcd_panel_mirror(panel, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y);
         esp_lcd_panel_disp_on_off(panel, true);
 
+#if CONFIG_AI_PASSPORT_MUSE_STYLE_UI
+        display_ = new MuseStyleDisplay(panel_io, panel,
+#else
         display_ = new SpiLcdDisplay(panel_io, panel,
+#endif
                                      DISPLAY_WIDTH, DISPLAY_HEIGHT,
                                      DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y,
                                      DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY);
