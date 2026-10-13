@@ -22,9 +22,26 @@
 
 namespace {
 
-constexpr int kFrameMs = 40;
-constexpr int kSleepFrameMs = 200;
-constexpr int kStripRows = 16;
+constexpr int kFrameMs = 40;        // listening, thinking, boot: 25 fps
+constexpr int kCalmFrameMs = 80;    // idle, speaking, error: 12.5 fps
+constexpr int kSleepFrameMs = 200;  // asleep, or covered by another view
+
+// The C3 has one core: at 25 fps the avatar took 40-47 % of it when idle and
+// left speaking with ~4 % idle time next to the Opus decoder (2026-10-13 profile).
+// Animations follow wall-clock time, so a lower rate only samples them less often.
+int FramePeriodMs(robot_mode_t mode) {
+    switch (mode) {
+        case ROBOT_MODE_LISTENING:
+        case ROBOT_MODE_THINKING:
+        case ROBOT_MODE_BOOT:
+            return kFrameMs;
+        case ROBOT_MODE_OFF:
+            return kSleepFrameMs;
+        default:
+            return kCalmFrameMs;
+    }
+}
+constexpr int kStripRows = 8;  // 192 px wide: 3 KB per strip
 constexpr int kMaxDirtyRects = 8;
 constexpr int64_t kHappyUs = 2500 * 1000;
 constexpr int64_t kErrorUs = 4000 * 1000;
@@ -219,6 +236,13 @@ void MuseStyleDisplay::Tick() {
     if (avatar_ == nullptr || strip_ == nullptr) {
         return;
     }
+    // Covered by another view (e.g. the recording overlay hides the screen's
+    // children): no one sees the avatar, so don't render it.
+    if (lv_obj_has_flag(avatar_, LV_OBJ_FLAG_HIDDEN)) {
+        lv_timer_set_period(timer_, kSleepFrameMs);
+        mode_ = -1;  // repaint fully and restore the rate when shown again
+        return;
+    }
     int64_t now = esp_timer_get_time();
     robot_mode_t mode = ModeOf(Application::GetInstance().GetDeviceState());
     if (sleepy_) {
@@ -234,7 +258,7 @@ void MuseStyleDisplay::Tick() {
         uint32_t accent = robot_pixel_accent(mode);
         lv_obj_set_style_text_color(status_label_, lv_color_hex(accent), 0);
         lv_obj_set_style_text_color(notification_label_, lv_color_hex(accent), 0);
-        lv_timer_set_period(timer_, mode == ROBOT_MODE_OFF ? kSleepFrameMs : kFrameMs);
+        lv_timer_set_period(timer_, FramePeriodMs(mode));
         last_grid_valid_ = false;  // the palette changes with the mode
     }
 
@@ -245,20 +269,7 @@ void MuseStyleDisplay::Tick() {
         .level = 0,
         .happy = now < happy_until_us_ ? 1.0f : 0.0f,
     };
-    int64_t render_start = esp_timer_get_time();
     robot_pixel_render(&pose);
-    int64_t render_us = esp_timer_get_time() - render_start;
-    render_max_us_ = std::max(render_max_us_, render_us);
-    render_sum_us_ += render_us;
-    render_frames_++;
-    if (now - render_log_us_ > 10 * 1000 * 1000) {
-        ESP_LOGI(TAG, "avatar render avg %d us, max %d us, %d frames",
-                 (int)(render_sum_us_ / render_frames_), (int)render_max_us_, render_frames_);
-        render_log_us_ = now;
-        render_max_us_ = 0;
-        render_sum_us_ = 0;
-        render_frames_ = 0;
-    }
     InvalidateChangedCells();
 }
 

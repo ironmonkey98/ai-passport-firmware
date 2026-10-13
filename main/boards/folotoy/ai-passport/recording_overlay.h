@@ -95,6 +95,9 @@ private:
     uint8_t levels_[kBars] = {};
     uint32_t ticks_ = 0, shown_seconds_ = UINT32_MAX;
     bool visible_ = false;
+    static constexpr size_t kMaxHidden = 16;
+    lv_obj_t* hidden_[kMaxHidden] = {};
+    size_t hidden_count_ = 0;
 
     lv_obj_t* MakeCanvas(int w, int h, uint32_t ink, lv_draw_buf_t** buf) {
         *buf = lv_draw_buf_create(w, h, LV_COLOR_FORMAT_I1, LV_STRIDE_AUTO);
@@ -178,10 +181,29 @@ private:
         return uint8_t(std::clamp(k, 0.0f, 1.0f) * 255.0f);
     }
 
+    // Labels redraw on every set, even with the same text; CJK glyphs are not
+    // cheap on the C3, so only touch them when something changed.
+    static void SetText(lv_obj_t* label, const char* text) {
+        if (std::strcmp(lv_label_get_text(label), text) != 0) lv_label_set_text(label, text);
+    }
+
+    static void SetHidden(lv_obj_t* obj, bool hidden) {
+        if (lv_obj_has_flag(obj, LV_OBJ_FLAG_HIDDEN) == hidden) return;  // a no-op flag write still redraws
+        if (hidden) lv_obj_add_flag(obj, LV_OBJ_FLAG_HIDDEN); else lv_obj_remove_flag(obj, LV_OBJ_FLAG_HIDDEN);
+    }
+
+    static void SetTextColor(lv_obj_t* obj, uint32_t color) {
+        if (lv_color_to_u32(lv_obj_get_style_text_color(obj, LV_PART_MAIN)) != lv_color_to_u32(lv_color_hex(color))) {
+            lv_obj_set_style_text_color(obj, lv_color_hex(color), 0);
+        }
+    }
+
     static void SetChip(lv_obj_t* dot, lv_obj_t* label, uint32_t color, const char* text) {
-        lv_obj_set_style_bg_color(dot, lv_color_hex(color), 0);
-        lv_obj_set_style_text_color(label, lv_color_hex(color), 0);
-        lv_label_set_text(label, text);
+        if (lv_color_to_u32(lv_obj_get_style_bg_color(dot, LV_PART_MAIN)) != lv_color_to_u32(lv_color_hex(color))) {
+            lv_obj_set_style_bg_color(dot, lv_color_hex(color), 0);
+        }
+        SetTextColor(label, color);
+        SetText(label, text);
     }
 
     static void Mmss(char* out, size_t n, uint64_t ms) {
@@ -194,15 +216,38 @@ private:
         visible_ = on;
         if (on) {
             lv_obj_remove_flag(root_, LV_OBJ_FLAG_HIDDEN);
-            // The Muse screen keeps animating underneath; hiding it stops its
-            // redraws (LVGL skips invalidating hidden objects), so the overlay
-            // does not compete with the avatar for the single core.
-            lv_obj_add_flag(lv_screen_active(), LV_OBJ_FLAG_HIDDEN);
+            // The Muse screen keeps animating underneath. Hiding its children
+            // stops their redraws (LVGL skips invalidating hidden objects) and
+            // lets the avatar skip rendering. The screen object itself must not
+            // be hidden: un-hiding a parentless object crashes LVGL 9.5.
+            HideScreenChildren(true);
             std::memset(levels_, 0, sizeof(levels_));
             shown_seconds_ = UINT32_MAX;
         } else {
-            lv_obj_remove_flag(lv_screen_active(), LV_OBJ_FLAG_HIDDEN);
-            lv_obj_invalidate(lv_screen_active());
+            HideScreenChildren(false);
+        }
+    }
+
+    // Hides the visible children of the active screen, and later restores
+    // exactly those; children that were already hidden stay hidden.
+    void HideScreenChildren(bool hide) {
+        lv_obj_t* screen = lv_screen_active();
+        if (screen == nullptr) return;
+        if (hide) {
+            hidden_count_ = 0;
+            const uint32_t n = lv_obj_get_child_count(screen);
+            for (uint32_t i = 0; i < n && hidden_count_ < kMaxHidden; i++) {
+                lv_obj_t* child = lv_obj_get_child(screen, i);
+                if (!lv_obj_has_flag(child, LV_OBJ_FLAG_HIDDEN)) {
+                    lv_obj_add_flag(child, LV_OBJ_FLAG_HIDDEN);
+                    hidden_[hidden_count_++] = child;
+                }
+            }
+        } else {
+            for (size_t i = 0; i < hidden_count_; i++) {
+                if (lv_obj_is_valid(hidden_[i])) lv_obj_remove_flag(hidden_[i], LV_OBJ_FLAG_HIDDEN);
+            }
+            hidden_count_ = 0;
         }
     }
 
@@ -237,33 +282,33 @@ private:
         char a[16], b[16], line[64];
 
         if (!active) {  // result screen
-            lv_obj_add_flag(dot_, LV_OBJ_FLAG_HIDDEN);
+            SetHidden(dot_, true);
             Mmss(a, sizeof(a), s.result_duration_ms);
             if (s.result == PassportRecorder::Result::Saved) {
-                lv_label_set_text(title_, "已保存");
-                lv_obj_set_style_text_color(title_, lv_color_hex(kGreen), 0);
+                SetText(title_, "已保存");
+                SetTextColor(title_, kGreen);
                 std::snprintf(line, sizeof(line), "时长 %s，已存到云端", a);
                 SetChip(chip_dot_, chip_, kGreen, "可以在网页查看");
             } else if (s.result == PassportRecorder::Result::Partial) {
-                lv_label_set_text(title_, "部分保存");
-                lv_obj_set_style_text_color(title_, lv_color_hex(kAmber), 0);
+                SetText(title_, "部分保存");
+                SetTextColor(title_, kAmber);
                 std::snprintf(line, sizeof(line), "时长 %s，有缺失片段", a);
                 SetChip(chip_dot_, chip_, kAmber, "已保存可用部分");
             } else {
-                lv_label_set_text(title_, "录音失败");
-                lv_obj_set_style_text_color(title_, lv_color_hex(kRed), 0);
+                SetText(title_, "录音失败");
+                SetTextColor(title_, kRed);
                 std::snprintf(line, sizeof(line), "云端未确认保存");
                 SetChip(chip_dot_, chip_, kRed, "请检查网络后重试");
             }
-            lv_label_set_text(uploaded_, line);
+            SetText(uploaded_, line);
             return;
         }
 
-        lv_label_set_text(title_, "REC");
-        lv_obj_set_style_text_color(title_, lv_color_hex(kRed), 0);
+        SetText(title_, "REC");
+        SetTextColor(title_, kRed);
         // Blink the dot once a second while capturing.
         bool dot_on = s.state != Recorder::State::Recording || (ticks_ / 5) % 2 == 0;
-        if (dot_on) lv_obj_remove_flag(dot_, LV_OBJ_FLAG_HIDDEN); else lv_obj_add_flag(dot_, LV_OBJ_FLAG_HIDDEN);
+        SetHidden(dot_, !dot_on);
 
         uint32_t seconds = uint32_t(s.duration_ms / 1000);
         if (seconds != shown_seconds_) {
@@ -280,15 +325,15 @@ private:
         Mmss(b, sizeof(b), s.duration_ms);
         const uint64_t lag_ms = s.duration_ms > s.acked_ms ? s.duration_ms - s.acked_ms : 0;
         if (s.state == Recorder::State::StartRequested) {
-            lv_label_set_text(uploaded_, "正在连接录音服务…");
+            SetText(uploaded_, "正在连接录音服务…");
             SetChip(chip_dot_, chip_, kDim, s.connected ? "等待云端确认" : "网络未连接");
         } else if (s.state == Recorder::State::Finishing) {
             std::snprintf(line, sizeof(line), "已上传 %s / %s", a, b);
-            lv_label_set_text(uploaded_, line);
+            SetText(uploaded_, line);
             SetChip(chip_dot_, chip_, kAmber, "正在保存…");
         } else {
             std::snprintf(line, sizeof(line), "已上传 %s", a);
-            lv_label_set_text(uploaded_, line);
+            SetText(uploaded_, line);
             if (!s.connected) {
                 std::snprintf(line, sizeof(line), "网络中断 积压%u秒", unsigned(lag_ms / 1000));
                 SetChip(chip_dot_, chip_, kRed, line);

@@ -713,7 +713,9 @@ void robot_pixel_render(const robot_pose_t* p)
     draw_character(&f, t, antenna_lit);
     s_ox = s_oy = 0;
     outline_pass();
-    draw_halo(halo, t);
+    /* Idle: a still halo. The moving ripple flips cells all over the ring, so
+     * nearly the whole avatar was redrawn every frame (2026-10-13 profile). */
+    draw_halo(halo, p->mode == ROBOT_MODE_IDLE ? 0.0f : t);
 
     /* sparkles orbit around her: behind first, then in front */
     if (p->mode != ROBOT_MODE_OFF && p->mode != ROBOT_MODE_ERROR) {

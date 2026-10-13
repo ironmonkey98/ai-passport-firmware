@@ -36,10 +36,6 @@ private:
     int64_t happy_until_us_ = 0;
     int64_t error_until_us_ = 0;
     bool sleepy_ = false;
-    int64_t render_max_us_ = 0;
-    int64_t render_log_us_ = 0;
-    int64_t render_sum_us_ = 0;
-    int render_frames_ = 0;
 
     void ApplyStyle();
     void CreateAvatar();
