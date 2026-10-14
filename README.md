@@ -16,7 +16,7 @@
 
 | 分支 | 内容 |
 |---|---|
-| `passport-recording`（默认） | 全部功能，推荐使用 |
+| `main`（默认） | 全部功能，推荐使用 |
 | `muse-style-ui` | 只有 Muse UI（AI Passport 与 ESP-Hi 竖屏版）和自定义 MAC，无提醒和录音 |
 
 ## 不接服务器也能用
@@ -38,7 +38,7 @@ idf.py --version
 
 ```bash
 git clone https://github.com/ironmonkey98/ai-passport-firmware.git
-cd ai-passport-firmware             # 默认分支 passport-recording
+cd ai-passport-firmware             # 默认分支 main
 ```
 
 ### 3. 设备凭据（需要提醒和录音时）
