@@ -15,9 +15,14 @@ public:
     Cw2017BatteryMonitor(i2c_master_bus_handle_t i2c_bus, uint8_t addr = 0x63);
     ~Cw2017BatteryMonitor();
 
-    // Returns true when the chip answers on the bus (and wakes it from a
-    // possible sleep/reset state). Safe to call once at board init.
+    // Returns true when the chip answers on the bus. Restores the cell profile
+    // if the gauge lost it, and wakes it from sleep. Call once at board init.
     bool Initialize();
+
+    // Puts the gauge into its sleep state ahead of a terminal deep sleep.
+    // Returns 0 on success, -1 when unavailable or when the readback verify
+    // failed twice in a row.
+    int EnterSleep();
 
     // Battery state of charge in percent (0-100), or -1 when unavailable.
     int GetBatteryLevel();
@@ -33,7 +38,12 @@ private:
     uint8_t device_address_;
     bool present_ = false;
 
+    int ReadReg(uint8_t reg, uint8_t* value);
+    int WriteReg(uint8_t reg, uint8_t value);
     int ReadReg16(uint8_t reg, uint16_t* value);
+    int SetMode(uint8_t mode);
+    int ProfileMatches(bool* matches);
+    int WriteProfile();
 };
 
 #endif  // CW2017_BATTERY_MONITOR_H

@@ -1,5 +1,6 @@
 #pragma once
 #include <esp_log.h>
+#include <functional>
 #if __has_include("codex_notify_private.h")
 #include <esp_crt_bundle.h>
 #include <esp_log.h>
@@ -26,6 +27,7 @@ class CodexNotify {
     int64_t expires_at_ = 0;
     std::atomic<bool> tick_queued_{false};
     PassportRecorder* recorder_ = nullptr;
+    std::function<void()> wake_;  // main task: bring the device out of soft sleep
     static bool Digits(const std::string& s, size_t start) {
         return s.find_first_not_of("0123456789", start) == std::string::npos;
     }
@@ -100,6 +102,8 @@ class CodexNotify {
             event = pending_event_;
             task = pending_task_;
         }
+        // The query needs the codec and plays a reply: wake from soft sleep first.
+        if (wake_) wake_();
         bool started = Application::GetInstance().RequestNotificationQuery(
             kCodexQueryAudio, sizeof(kCodexQueryAudio), [this, event](bool success) {
                 {
@@ -145,6 +149,9 @@ class CodexNotify {
         config.credentials.client_id = CODEX_NOTIFY_CLIENT_ID;
         config.credentials.authentication.password = CODEX_NOTIFY_PASSWORD;
         config.session.keepalive = 60;
+        // The first attempt runs before Wi-Fi is up; with esp-mqtt's 10 s default
+        // the channel (and recording) only came up ~25 s after boot.
+        config.network.reconnect_timeout_ms = 3000;
         config.buffer.size = 1024;
         config.buffer.out_size = 512;
         config.outbox.limit = 2048;
@@ -191,6 +198,7 @@ class CodexNotify {
 
 public:
     void SetRecorder(PassportRecorder* recorder) { recorder_ = recorder; }
+    void SetWakeHandler(std::function<void()> wake) { wake_ = std::move(wake); }
     void Start() {
         // StartNetwork invokes this after Application initialization.
         xTaskCreate(
@@ -208,6 +216,7 @@ class PassportRecorder;
 class CodexNotify {
 public:
     void SetRecorder(PassportRecorder*) {}
+    void SetWakeHandler(std::function<void()>) {}
     void Start() {
         ESP_LOGW("CodexNotify",
                  "Notification credentials not configured; voice and UI remain available");
