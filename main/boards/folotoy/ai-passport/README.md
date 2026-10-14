@@ -35,12 +35,24 @@ Outputs `build/merged-binary.bin` (8 MB flash, USB Serial/JTAG console).
 The three physical keys map to XiaoZhi's voice-assistant actions:
 
 - **OK** — single click: toggle the chat state (or enter Wi-Fi config mode
-  while starting up)
+  while starting up); long press: start or stop an online recording (only
+  when `codex_notify_private.h` is present)
 - **UP** — single click: volume +10; long press: max volume
 - **DOWN** — single click: volume -10; long press: mute
 
 Because the ladder shares one ADC pin, XiaoZhi reads it as three
 independent ADC buttons (the same pattern as the ESP-BOX-Lite).
+
+## Codex notifications and online recording (this fork)
+
+Built only when `codex_notify_private.h` exists (copy
+`codex_notify_private.example.h`; the real header is git-ignored). The device
+keeps one outbound MQTT/WSS connection to your server: it receives Codex
+completion signals (`codex_notify.h`), then starts a normal chat that asks the
+cloud to play the result, and it streams recordings (`passport_recorder.h`,
+`recorder_core.h`, overlay in `recording_overlay.h`). A notification also wakes
+the device from soft sleep. Setup and the server side:
+[xiaozhi-cloud-codex-bridge](https://github.com/ironmonkey98/xiaozhi-cloud-codex-bridge).
 
 ## Power management
 
