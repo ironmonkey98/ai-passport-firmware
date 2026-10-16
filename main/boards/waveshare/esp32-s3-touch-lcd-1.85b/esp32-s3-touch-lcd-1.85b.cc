@@ -5,6 +5,31 @@
 #include "button.h"
 #include "config.h"
 #include "power_save_timer.h"
+#if CONFIG_WAVESHARE_185B_MUSE_STYLE_UI
+#include "muse_style_display.h"
+#endif
+#if __has_include("codex_notify_private.h")
+#include "codex_notify_private.h"
+#endif
+#include "codex/codex_notify.h"
+#ifdef CODEX_NOTIFY_URL
+#include "codex/recording_overlay.h"
+// The recording device ID is the notification account (one ACL per device).
+static PassportRecorder* RecorderInstance() {
+    static PassportRecorder recorder(CODEX_NOTIFY_USERNAME);
+    return &recorder;
+}
+// Main task. The overlay is created outside the recorder's mutex (lock order).
+static void ToggleRecording(Display* display) {
+    static RecordingOverlay overlay(RecorderInstance());
+    {
+        DisplayLockGuard lock(display);
+        overlay.Create(display);
+    }
+    RecorderInstance()->Toggle();
+}
+#define WAVESHARE_185B_RECORDING 1
+#endif
 
 #include <esp_log.h>
 #include <driver/i2c_master.h>
@@ -571,8 +596,13 @@ private:
         esp_lcd_panel_swap_xy(panel, DISPLAY_SWAP_XY);
         esp_lcd_panel_mirror(panel, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y);
 
+#if CONFIG_WAVESHARE_185B_MUSE_STYLE_UI
+        display_ = new MuseStyleDisplay(panel_io, panel,
+                                    DISPLAY_WIDTH, DISPLAY_HEIGHT, DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY);
+#else
         display_ = new SpiLcdDisplay(panel_io, panel,
                                     DISPLAY_WIDTH, DISPLAY_HEIGHT, DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY);
+#endif
     }
 
     void InitializeButtons() {
@@ -582,8 +612,18 @@ private:
                 EnterWifiConfigMode();
                 return;
             }
+            // A click must not start a conversation in the middle of a recording.
+            if (app.GetDeviceState() == kDeviceStateRecording) {
+                return;
+            }
             app.ToggleChatState();
         });
+#if WAVESHARE_185B_RECORDING
+        // Long press starts or stops an online recording.
+        boot_button_.OnLongPress([]() {
+            Application::GetInstance().Schedule([]() { ToggleRecording(Board::GetInstance().GetDisplay()); });
+        });
+#endif
 #if CONFIG_USE_DEVICE_AEC
         boot_button_.OnDoubleClick([this]() {
             auto& app = Application::GetInstance();
@@ -604,6 +644,17 @@ public:
         Initializest77916Display();
         InitializeButtons();
         GetBacklight()->RestoreBrightness();
+    }
+
+    void StartNetwork() override {
+        WifiBoard::StartNetwork();
+        static CodexNotify codex_notify;
+#if WAVESHARE_185B_RECORDING
+        codex_notify.SetRecorder(RecorderInstance());
+        // A Codex result is coming: leave the dimmed screen so the user sees it.
+        codex_notify.SetWakeHandler([this]() { power_save_timer_->WakeUp(); });
+#endif
+        codex_notify.Start();
     }
 
     virtual AudioCodec* GetAudioCodec() override {

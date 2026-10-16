@@ -18,6 +18,7 @@
 |---|---|
 | `main`（默认） | 全部功能，推荐使用 |
 | `muse-style-ui` | 只有 Muse UI（AI Passport 与 ESP-Hi 竖屏版）和自定义 MAC，无提醒和录音 |
+| `waveshare-1.85b` | 在 `main` 基础上增加 Waveshare ESP32-S3-Touch-LCD-1.85B（360×360 圆屏）：Muse 界面、提醒、BOOT 长按录音；编译 `waveshare/esp32-s3-touch-lcd-1.85b` |
 
 ## 不接服务器也能用
 
@@ -44,7 +45,7 @@ cd ai-passport-firmware             # 默认分支 main
 ### 3. 设备凭据（需要提醒和录音时）
 
 ```bash
-cp main/boards/folotoy/ai-passport/codex_notify_private.example.h \
+cp main/boards/common/codex/codex_notify_private.example.h \
    main/boards/folotoy/ai-passport/codex_notify_private.h
 ```
 
@@ -132,7 +133,9 @@ esptool --chip esp32c3 -p /dev/cu.usbmodem101 write-flash 0x20000 build/xiaozhi.
 | 路径 | 内容 |
 |---|---|
 | `main/display/muse_style/` | Muse 风格 UI 与像素机器人 |
-| `main/boards/folotoy/ai-passport/` | 板级：按键、省电、电量、提醒（`codex_notify.h`）、录音（`passport_recorder.h`、`recorder_core.h`、`recording_overlay.h`） |
+| `main/boards/folotoy/ai-passport/` | AI Passport 板级：按键、省电、电量 |
+| `main/boards/common/codex/` | 两块板子共用：提醒（`codex_notify.h`）、录音（`passport_recorder.h`、`recorder_core.h`、`recording_overlay.h`） |
+| `main/boards/waveshare/esp32-s3-touch-lcd-1.85b/` | Waveshare 1.85B（本分支）：Muse 圆屏界面、BOOT 长按录音、提醒 |
 | `main/application.*`、`main/audio/`、`main/device_state*` | 录音状态与音频旁路 |
 
 板级详细说明（英文）：[main/boards/folotoy/ai-passport/README.md](main/boards/folotoy/ai-passport/README.md)。录音协议：bridge 仓库 `docs/RECORDING_PROTOCOL.md`。

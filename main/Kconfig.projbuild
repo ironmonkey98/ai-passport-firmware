@@ -897,6 +897,14 @@ config ESP_HI_MUSE_STYLE_UI
         (status, avatar, subtitle) instead of the emoji animations. For an
         ESP-Hi board used without the dog body.
 
+config WAVESHARE_185B_MUSE_STYLE_UI
+    bool "Waveshare 1.85B: Muse-style pixel robot UI (round)"
+    depends on BOARD_TYPE_WAVESHARE_ESP32_S3_TOUCH_LCD_1_85B && USE_DEFAULT_MESSAGE_STYLE
+    default y
+    help
+        Use the Muse-style pixel robot UI on the 360x360 round panel instead of
+        the default emoji UI. The base layout is pulled inside the circle.
+
 config AI_PASSPORT_MUSE_STYLE_UI
     bool "AI Passport: Muse-style pixel robot UI"
     depends on BOARD_TYPE_FOLOTOY_AI_PASSPORT && USE_DEFAULT_MESSAGE_STYLE

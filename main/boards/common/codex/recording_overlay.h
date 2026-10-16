@@ -28,6 +28,12 @@ public:
         auto theme = static_cast<LvglTheme*>(display->GetTheme());
         const lv_font_t* font = theme->text_font()->font();
         const int w = display->width(), h = display->height();
+        // A round panel (width == height) loses its corners: keep everything inside the circle.
+        const bool round = w == h;
+        const int left = round ? w / 6 : 16, top = round ? h / 7 : 20, bottom = round ? h / 9 : 0;
+        // Larger panels get larger timer dots and wider wave bars.
+        cell_ = w >= 320 ? 7 : 5;
+        pitch_ = w >= 320 ? 7 : 6;
 
         root_ = lv_obj_create(lv_layer_top());
         lv_obj_remove_style_all(root_);
@@ -44,33 +50,33 @@ public:
         lv_obj_set_style_radius(dot_, LV_RADIUS_CIRCLE, 0);
         lv_obj_set_style_bg_color(dot_, lv_color_hex(kRed), 0);
         lv_obj_set_style_bg_opa(dot_, LV_OPA_COVER, 0);
-        lv_obj_align(dot_, LV_ALIGN_TOP_LEFT, 16, 20);
+        lv_obj_align(dot_, LV_ALIGN_TOP_LEFT, left, top);
 
         title_ = lv_label_create(root_);
         lv_obj_set_style_text_color(title_, lv_color_hex(kRed), 0);
         lv_label_set_text(title_, "REC");
         lv_obj_align_to(title_, dot_, LV_ALIGN_OUT_RIGHT_MID, 8, 0);
 
-        timer_canvas_ = MakeCanvas(kTimerW, kTimerH, kWhite, &timer_buf_);
-        lv_obj_align(timer_canvas_, LV_ALIGN_TOP_MID, 0, 62);
+        timer_canvas_ = MakeCanvas(TimerW(), TimerH(), kWhite, &timer_buf_);
+        lv_obj_align(timer_canvas_, LV_ALIGN_TOP_MID, 0, top + 42);
 
-        wave_w_ = std::min(w - 16, kBars * kBarPitch);
+        wave_w_ = std::min(w - 16, kBars * pitch_);
         wave_canvas_ = MakeCanvas(wave_w_, kWaveH, kRed, &wave_buf_);
-        lv_obj_align(wave_canvas_, LV_ALIGN_TOP_MID, 0, 62 + kTimerH + 28);
+        lv_obj_align(wave_canvas_, LV_ALIGN_TOP_MID, 0, top + 42 + TimerH() + 28);
 
         uploaded_ = lv_label_create(root_);
         lv_obj_set_style_text_color(uploaded_, lv_color_hex(kText), 0);
-        lv_obj_align(uploaded_, LV_ALIGN_BOTTOM_LEFT, 16, -48);
+        lv_obj_align(uploaded_, LV_ALIGN_BOTTOM_LEFT, left, -48 - bottom);
 
         chip_dot_ = lv_obj_create(root_);
         lv_obj_remove_style_all(chip_dot_);
         lv_obj_set_size(chip_dot_, 10, 10);
         lv_obj_set_style_radius(chip_dot_, LV_RADIUS_CIRCLE, 0);
         lv_obj_set_style_bg_opa(chip_dot_, LV_OPA_COVER, 0);
-        lv_obj_align(chip_dot_, LV_ALIGN_BOTTOM_LEFT, 18, -22);
+        lv_obj_align(chip_dot_, LV_ALIGN_BOTTOM_LEFT, left + 2, -22 - bottom);
 
         chip_ = lv_label_create(root_);
-        lv_obj_align(chip_, LV_ALIGN_BOTTOM_LEFT, 36, -16);
+        lv_obj_align(chip_, LV_ALIGN_BOTTOM_LEFT, left + 20, -16 - bottom);
 
         timer_ = lv_timer_create([](lv_timer_t* t) {
             static_cast<RecordingOverlay*>(lv_timer_get_user_data(t))->Tick();
@@ -80,10 +86,12 @@ public:
 private:
     static constexpr uint32_t kRed = 0xFF4D5E, kWhite = 0xF2F2F7, kText = 0xC9CCDD;
     static constexpr uint32_t kGreen = 0x34E3A6, kAmber = 0xFFC24D, kDim = 0x6B6F80;
-    static constexpr int kCell = 5;                 // one pixel-font dot = 5x5 screen pixels
     static constexpr int kGlyphW = 5, kGlyphH = 7;  // 5x7 pixel digits
-    static constexpr int kTimerW = (4 * (kGlyphW + 1) + 2) * kCell, kTimerH = kGlyphH * kCell;
-    static constexpr int kBars = 36, kBarPitch = 6, kBarW = 4, kWaveH = 64;
+    static constexpr int kBars = 36, kWaveH = 64;
+    int cell_ = 5;   // one pixel-font dot = cell_ x cell_ screen pixels
+    int pitch_ = 6;  // wave bar pitch; each bar is pitch_ - 2 wide
+    int TimerW() const { return (4 * (kGlyphW + 1) + 2) * cell_; }
+    int TimerH() const { return kGlyphH * cell_; }
     static constexpr uint64_t kResultShowMs = 4000;
 
     PassportRecorder* recorder_;
@@ -137,7 +145,7 @@ private:
         return c >= '0' && c <= '9' ? kDigits[c - '0'] : nullptr;
     }
 
-    // "MM:SS" in LED-style dots: each lit dot is a (kCell-1) square with a 1 px gap.
+    // "MM:SS" in LED-style dots: each lit dot is a (cell_-1) square with a 1 px gap.
     void DrawTimer(uint32_t seconds) {
         char text[8];
         std::snprintf(text, sizeof(text), "%02u:%02u", unsigned(std::min<uint32_t>(seconds / 60, 99)), unsigned(seconds % 60));
@@ -145,30 +153,30 @@ private:
         int x = 0;
         for (const char* p = text; *p; p++) {
             if (*p == ':') {
-                Fill(timer_buf_, x, 2 * kCell, kCell - 1, kCell - 1);
-                Fill(timer_buf_, x, 4 * kCell, kCell - 1, kCell - 1);
-                x += 2 * kCell;
+                Fill(timer_buf_, x, 2 * cell_, cell_ - 1, cell_ - 1);
+                Fill(timer_buf_, x, 4 * cell_, cell_ - 1, cell_ - 1);
+                x += 2 * cell_;
                 continue;
             }
             const uint8_t* g = Glyph(*p);
             for (int row = 0; row < kGlyphH; row++) {
                 for (int col = 0; col < kGlyphW; col++) {
-                    if (g[row] & (0x10 >> col)) Fill(timer_buf_, x + col * kCell, row * kCell, kCell - 1, kCell - 1);
+                    if (g[row] & (0x10 >> col)) Fill(timer_buf_, x + col * cell_, row * cell_, cell_ - 1, cell_ - 1);
                 }
             }
-            x += (kGlyphW + 1) * kCell;
+            x += (kGlyphW + 1) * cell_;
         }
         lv_obj_invalidate(timer_canvas_);
     }
 
     void DrawWave() {
         Clear(wave_buf_);
-        const int bars = wave_w_ / kBarPitch;
+        const int bars = wave_w_ / pitch_;
         for (int i = 0; i < bars; i++) {
             int level = levels_[kBars - bars + i];  // newest on the right
             int h = std::max(2, level * (kWaveH - 4) / 255);
             h -= h % 2;  // keep the bar centred
-            Fill(wave_buf_, i * kBarPitch, (kWaveH - h) / 2, kBarW, h);
+            Fill(wave_buf_, i * pitch_, (kWaveH - h) / 2, pitch_ - 2, h);
         }
         lv_obj_invalidate(wave_canvas_);
     }

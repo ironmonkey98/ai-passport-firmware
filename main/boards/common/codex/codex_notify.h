@@ -1,7 +1,9 @@
 #pragma once
 #include <esp_log.h>
 #include <functional>
-#if __has_include("codex_notify_private.h")
+// Shared by the boards with Codex notifications and recording. The board includes its own
+// git-ignored codex_notify_private.h before this header; without it this is a no-op stub.
+#ifdef CODEX_NOTIFY_URL
 #include <esp_crt_bundle.h>
 #include <esp_log.h>
 #include <cJSON.h>
@@ -10,7 +12,6 @@
 #include <ctime>
 #include <mutex>
 #include "application.h"
-#include "codex_notify_private.h"
 #include "codex_query_audio.h"
 #include "passport_recorder.h"
 #include "settings.h"

@@ -20,4 +20,4 @@ mmap_generate_*.h
 .clangd
 
 # AI Passport notification credentials (see firmware/ai-passport in xiaozhi-cloud-codex-bridge)
-main/boards/folotoy/ai-passport/codex_notify_private.h
+main/boards/**/codex_notify_private.h

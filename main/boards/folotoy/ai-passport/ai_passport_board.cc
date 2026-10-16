@@ -2,14 +2,17 @@
 #include "assets/lang_config.h"
 #include "button.h"
 #include "codecs/es8311_audio_codec.h"
-#include "codex_notify.h"
 #if __has_include("codex_notify_private.h")
+#include "codex_notify_private.h"
+#endif
+#include "codex/codex_notify.h"
+#ifdef CODEX_NOTIFY_URL
 // The recording device ID is the notification account (one ACL per device).
 static PassportRecorder* RecorderInstance() {
     static PassportRecorder recorder(CODEX_NOTIFY_USERNAME);
     return &recorder;
 }
-#include "recording_overlay.h"
+#include "codex/recording_overlay.h"
 // Main task. The overlay is created outside the recorder's mutex (lock order).
 static void ToggleRecording(Display* display) {
     static RecordingOverlay overlay(RecorderInstance());

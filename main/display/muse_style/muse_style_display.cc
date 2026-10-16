@@ -133,7 +133,10 @@ void MuseStyleDisplay::SetupUI() {
 }
 
 void MuseStyleDisplay::CreateAvatar() {
-    int fit = std::min(width_ - 16, height_ - 120);
+    // A round panel has no room in the corners, so the avatar takes the middle
+    // and the bars hug the top and bottom edges of the circle.
+    bool round = width_ == height_;
+    int fit = round ? std::min(width_, height_ - 100) : std::min(width_ - 16, height_ - 120);
     int size = ROBOT_PX_W * std::max(1, fit / ROBOT_PX_W);
     robot_pixel_set_size(size);
 
@@ -166,7 +169,7 @@ void MuseStyleDisplay::CreateAvatar() {
 
     avatar_ = lv_image_create(lv_screen_active());
     lv_image_set_src(avatar_, &avatar_src_);
-    lv_obj_align(avatar_, LV_ALIGN_CENTER, 0, 4);
+    lv_obj_align(avatar_, LV_ALIGN_CENTER, 0, round ? 0 : 4);
     // Above the background container, below the bars and popups.
     lv_obj_move_to_index(avatar_, 1);
 }
@@ -206,6 +209,27 @@ void MuseStyleDisplay::ApplyStyle() {
     }
     if (chat_message_label_ != nullptr) {
         lv_obj_set_style_text_color(chat_message_label_, lv_color_hex(kTextColor), 0);
+    }
+    // A round panel (width == height) loses its corners: pull the icons and the
+    // chat line inside the circle. Rectangular panels keep the base layout.
+    if (width_ == height_) {
+        if (top_bar_ != nullptr) {
+            lv_obj_set_style_pad_left(top_bar_, width_ / 4, 0);
+            lv_obj_set_style_pad_right(top_bar_, width_ / 4, 0);
+            lv_obj_set_style_pad_top(top_bar_, height_ / 36, 0);
+            if (status_bar_ != nullptr) {
+                lv_obj_update_layout(top_bar_);
+                lv_obj_align(status_bar_, LV_ALIGN_TOP_MID, 0, lv_obj_get_height(top_bar_) - 4);
+            }
+        }
+        if (bottom_bar_ != nullptr) {
+            // Transparent, so the bar does not cut into the avatar's halo.
+            lv_obj_set_style_bg_opa(bottom_bar_, LV_OPA_TRANSP, 0);
+            lv_obj_align(bottom_bar_, LV_ALIGN_BOTTOM_MID, 0, -height_ / 14);
+        }
+        if (chat_message_label_ != nullptr) {
+            lv_obj_set_width(chat_message_label_, width_ * 11 / 18);
+        }
     }
     last_grid_valid_ = false;
 }

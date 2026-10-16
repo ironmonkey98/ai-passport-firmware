@@ -1,4 +1,4 @@
-// Copy to codex_notify_private.h (git-ignored) and fill in your own values.
+// Copy to <your board dir>/codex_notify_private.h (git-ignored) and fill in your own values.
 // Without codex_notify_private.h the firmware builds without notifications and recording.
 // The device ID is the MQTT username; it must match the broker ACL and the server's
 // recording.json "devices" list.

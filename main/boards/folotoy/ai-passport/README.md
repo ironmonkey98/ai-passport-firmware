@@ -46,11 +46,11 @@ independent ADC buttons (the same pattern as the ESP-BOX-Lite).
 ## Codex notifications and online recording (this fork)
 
 Built only when `codex_notify_private.h` exists (copy
-`codex_notify_private.example.h`; the real header is git-ignored). The device
+`main/boards/common/codex/codex_notify_private.example.h` into this directory;
+the real header is git-ignored). The device
 keeps one outbound MQTT/WSS connection to your server: it receives Codex
 completion signals (`codex_notify.h`), then starts a normal chat that asks the
-cloud to play the result, and it streams recordings (`passport_recorder.h`,
-`recorder_core.h`, overlay in `recording_overlay.h`). A notification also wakes
+cloud to play the result, and it streams recordings (shared headers in `main/boards/common/codex/`). A notification also wakes
 the device from soft sleep. Setup and the server side:
 [xiaozhi-cloud-codex-bridge](https://github.com/ironmonkey98/xiaozhi-cloud-codex-bridge).
 
